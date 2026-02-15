@@ -1,6 +1,6 @@
 #!/bin/sh
 # PAQWRT - Professional Paqet Manager for OpenWrt
-# Version: 2.1.2
+# Version: 2.1.3
 # Repository: https://github.com/bolandi-org/paqwrt
 
 # --- Global Variables ---
@@ -265,10 +265,9 @@ setup_network() {
         GW_IP=$(ip route show default | awk '/default/ {print $3}' | head -n1)
         
         if [ -n "$WAN_INT" ] && [ -n "$GW_IP" ]; then
-            WAN_IP=$(ip -4 addr show $WAN_INT 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n 1)
-            # Ping gateway to populate ARP table
+            WAN_IP=$(ip -4 addr show $WAN_INT 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n 1)
             ping -c 1 -W 1 $GW_IP >/dev/null 2>&1
-            ROUTER_MAC=$(ip neigh show $GW_IP | awk '{print $5}' | grep -oE '([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}')
+            ROUTER_MAC=$(ip neigh show $GW_IP | awk '{for(i=1;i<=NF;i++) if($i ~ /..:..:..:..:..:../) print $i}' | head -n 1)
             
             if [ -n "$WAN_IP" ] && [ -n "$ROUTER_MAC" ]; then break; fi
         fi
@@ -278,12 +277,25 @@ setup_network() {
 
     if [ -z "$WAN_IP" ] || [ -z "$ROUTER_MAC" ]; then return 1; fi
 
+    # Fix: Validation only allows 1 connection if port is explicitly set
+    CONN=$(grep "conn:" /etc/paqet/config.yaml | awk '{print $2}')
+    [ -z "$CONN" ] && CONN=1
+    
+    if [ "$CONN" -gt 1 ]; then
+        TARGET_PORT="0"
+    else
+        TARGET_PORT="$LOCAL_PORT"
+    fi
+
     # Inject Dynamic Network Info into Config
     sed -i "s/interface: .*/interface: \"$WAN_INT\"/" /etc/paqet/config.yaml
-    sed -i "s/addr: .* # DYNAMIC/addr: \"$WAN_IP:$LOCAL_PORT\" # DYNAMIC/" /etc/paqet/config.yaml
-    # Fallback sed
-    sed -i "s/addr: \"0.0.0.0:0\"/addr: \"$WAN_IP:$LOCAL_PORT\"/" /etc/paqet/config.yaml
+    sed -i "s/addr: .* # DYNAMIC/addr: \"$WAN_IP:$TARGET_PORT\" # DYNAMIC/" /etc/paqet/config.yaml
     sed -i "s/router_mac: .*/router_mac: \"$ROUTER_MAC\"/" /etc/paqet/config.yaml
+
+    # Extract Server Info for NFT Rules
+    SERVER_ADDR=$(grep "addr:" /etc/paqet/config.yaml | grep -v "DYNAMIC" | head -n 1 | awk '{print $2}' | tr -d '"')
+    S_IP=$(echo $SERVER_ADDR | cut -d: -f1)
+    S_PORT=$(echo $SERVER_ADDR | cut -d: -f2)
 
     # Firewall Rules (NFTables)
     nft delete table inet paqet_rules 2>/dev/null || true
@@ -292,13 +304,12 @@ setup_network() {
     nft add chain inet paqet_rules output { type filter hook output priority -300 \; }
     nft add chain inet paqet_rules forward { type filter hook forward priority -150 \; }
     
-    # MSS Clamping (Fixes site loading issues)
     nft add rule inet paqet_rules forward tcp flags syn tcp option maxseg size set 1300
     
-    # Bypass Conntrack
-    nft add rule inet paqet_rules prerouting tcp sport 1443 tcp dport $LOCAL_PORT notrack
-    nft add rule inet paqet_rules output tcp sport $LOCAL_PORT tcp dport 1443 notrack
-    nft add rule inet paqet_rules output tcp sport $LOCAL_PORT tcp dport 1443 tcp flags rst drop
+    # Bypass Conntrack by Server IP/Port (More robust for multi-conn)
+    nft add rule inet paqet_rules prerouting ip saddr $S_IP tcp sport $S_PORT notrack
+    nft add rule inet paqet_rules output ip daddr $S_IP tcp dport $S_PORT notrack
+    nft add rule inet paqet_rules output ip daddr $S_IP tcp dport $S_PORT tcp flags rst drop
     
     return 0
 }
