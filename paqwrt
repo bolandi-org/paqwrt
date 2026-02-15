@@ -345,23 +345,15 @@ fi
 
 # Handle CLI args
 if [ "$1" = "install" ]; then
-    # Ensure install dir exists
-    mkdir -p "$INSTALL_DIR"
+    # Define target explicitly to avoid any variable scope issues
+    mkdir -p /usr/bin
+    TARGET_PATH="/usr/bin/paqwrt"
     
-    # Download script if we're running from a pipe/temp file
-    TARGET_PATH="$INSTALL_DIR/paqwrt"
-    
-    # Only update core once
     update_core
     
-    # Save the script itself to /usr/bin/paqwrt
-    # We use $0 if it's a file, or download if it's a pipe
-    if [ -f "$0" ] && [ "$(basename "$0")" = "paqwrt" ]; then
-        cp "$0" "$TARGET_PATH"
-    else
-        # Use a timestamp to bypass GitHub's raw cache during installation
-        curl -sL "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt?v=$(date +%s)" -o "$TARGET_PATH"
-    fi
+    # Force download to the correct path to be 100% sure
+    echo -e "${YELLOW}Saving script to $TARGET_PATH...${NC}"
+    curl -sL "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt?v=$(date +%s)" -o "$TARGET_PATH"
     
     chmod +x "$TARGET_PATH"
     echo -e "${GREEN}Paqwrt installed successfully! Run 'paqwrt' to start.${NC}"
