@@ -345,18 +345,25 @@ fi
 
 # Handle CLI args
 if [ "$1" = "install" ]; then
-    # Define target explicitly to avoid any variable scope issues
-    mkdir -p /usr/bin
+    # Define target paths
     TARGET_PATH="/usr/bin/paqwrt"
+    mkdir -p /usr/bin
     
     update_core
     
-    # Force download to the correct path to be 100% sure
+    # Force download using redirection (more robust than -o on some OpenWrt builds)
     echo -e "${YELLOW}Saving script to $TARGET_PATH...${NC}"
-    curl -sL "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt?v=$(date +%s)" -o "$TARGET_PATH"
+    curl -L "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt?v=$(date +%s)" > "$TARGET_PATH"
     
-    chmod +x "$TARGET_PATH"
-    echo -e "${GREEN}Paqwrt installed successfully! Run 'paqwrt' to start.${NC}"
+    if [ $? -eq 0 ] && [ -s "$TARGET_PATH" ]; then
+        chmod +x "$TARGET_PATH"
+        # Refresh shell hash so it finds the new command immediately
+        hash -r 2>/dev/null || true
+        echo -e "${GREEN}Paqwrt installed successfully! Run 'paqwrt' to start.${NC}"
+    else
+        echo -e "${RED}Error: Failed to save script to $TARGET_PATH${NC}"
+        exit 1
+    fi
     exit 0
 else
     while true; do show_menu; done
