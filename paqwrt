@@ -1,6 +1,6 @@
 #!/bin/sh
 # PAQWRT - Professional Paqet Manager for OpenWrt
-# Version: 2.1.4
+# Version: 2.1.5
 # Repository: https://github.com/bolandi-org/paqwrt
 
 # --- Global Variables ---
@@ -265,9 +265,14 @@ setup_network() {
         GW_IP=$(ip route show default | awk '/default/ {print $3}' | head -n1)
         
         if [ -n "$WAN_INT" ] && [ -n "$GW_IP" ]; then
-            WAN_IP=$(ip -4 addr show $WAN_INT 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n 1)
+            # Use broader match for IP to support different BusyBox versions
+            WAN_IP=$(ip addr show $WAN_INT 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1 | head -n 1)
             ping -c 1 -W 1 $GW_IP >/dev/null 2>&1
-            ROUTER_MAC=$(ip neigh show $GW_IP | awk '{for(i=1;i<=NF;i++) if($i ~ /..:..:..:..:..:../) print $i}' | head -n 1)
+            ROUTER_MAC=$(ip neigh show $GW_IP 2>/dev/null | awk '/..:..:..:..:..:../ {print $5}' | head -n 1)
+            # Fallback for MAC if awk fails
+            if [ -z "$ROUTER_MAC" ]; then
+                ROUTER_MAC=$(ip neigh show $GW_IP 2>/dev/null | grep -oE "..:..:..:..:..:.." | head -n 1)
+            fi
             
             if [ -n "$WAN_IP" ] && [ -n "$ROUTER_MAC" ]; then break; fi
         fi
@@ -281,9 +286,10 @@ setup_network() {
     CONN=$(grep "conn:" /etc/paqet/config.yaml | awk '{print $2}')
     [ -z "$CONN" ] && CONN=1
     
+    # Validation: multiple connections require NO explicit port
     if [ "$CONN" -gt 1 ]; then
-        # For multi-conn, we must use 0.0.0.0:0 to let paqet manage ports
-        TARGET_ADDR="0.0.0.0:0"
+        # For multi-conn, use IP only or 0.0.0.0 (paqet will handle ports)
+        TARGET_ADDR="$WAN_IP"
     else
         TARGET_ADDR="$WAN_IP:$LOCAL_PORT"
     fi
