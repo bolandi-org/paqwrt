@@ -1,6 +1,6 @@
 #!/bin/sh
 # PAQWRT - Professional Paqet Manager for OpenWrt
-# Version: 2.1.3
+# Version: 2.1.4
 # Repository: https://github.com/bolandi-org/paqwrt
 
 # --- Global Variables ---
@@ -282,14 +282,15 @@ setup_network() {
     [ -z "$CONN" ] && CONN=1
     
     if [ "$CONN" -gt 1 ]; then
-        TARGET_PORT="0"
+        # For multi-conn, we must use 0.0.0.0:0 to let paqet manage ports
+        TARGET_ADDR="0.0.0.0:0"
     else
-        TARGET_PORT="$LOCAL_PORT"
+        TARGET_ADDR="$WAN_IP:$LOCAL_PORT"
     fi
 
     # Inject Dynamic Network Info into Config
     sed -i "s/interface: .*/interface: \"$WAN_INT\"/" /etc/paqet/config.yaml
-    sed -i "s/addr: .* # DYNAMIC/addr: \"$WAN_IP:$TARGET_PORT\" # DYNAMIC/" /etc/paqet/config.yaml
+    sed -i "s/addr: .* # DYNAMIC/addr: \"$TARGET_ADDR\" # DYNAMIC/" /etc/paqet/config.yaml
     sed -i "s/router_mac: .*/router_mac: \"$ROUTER_MAC\"/" /etc/paqet/config.yaml
 
     # Extract Server Info for NFT Rules
