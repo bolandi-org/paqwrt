@@ -1,6 +1,6 @@
 #!/bin/sh
 # PAQWRT - Professional Paqet Manager for OpenWrt
-# Version: 2.1.6 (Fix: Multi-conn port binding)
+# Version: 2.1.7 (Self-Healing Config Fix)
 # Repository: https://github.com/bolandi-org/paqwrt
 
 # --- Global Variables ---
@@ -171,7 +171,7 @@ configure_paqet() {
     fi
 
     mkdir -p "$CONF_DIR"
-    # Placeholder config - will be updated dynamically by init script
+    # Create base config
     cat <<EOC > "$CONF_FILE"
 role: "client"
 log:
@@ -181,8 +181,8 @@ socks5:
 network:
   interface: "eth1"
   ipv4:
-    addr: "0.0.0.0:0"  # DYNAMIC
-    router_mac: ""     # DYNAMIC
+    addr: "0.0.0.0:0"
+    router_mac: ""
 server:
   addr: "$SERVER_ADDR"
 transport:
@@ -234,29 +234,29 @@ setup_network() {
     if [ -z "$WAN_IP" ] || [ -z "$ROUTER_MAC" ]; then return 1; fi
 
     # --- CRITICAL FIX: Handle Multi-Connection Port Binding ---
-    CONN=$(grep "conn:" /etc/paqet/config.yaml | awk '{print $2}')
+    CONN=$(awk '/conn:/ {print $2}' /etc/paqet/config.yaml)
     [ -z "$CONN" ] && CONN=1
     
-    # If Conn > 1, we MUST use port 0 (random ephemeral ports).
-    # If Conn = 1, we can use a fixed port (better for debugging).
+    # If Conn > 1, use port 0 (random). If Conn = 1, use fixed port.
     if [ "$CONN" -gt 1 ]; then
         TARGET_ADDR="$WAN_IP:0"
     else
         TARGET_ADDR="$WAN_IP:$LOCAL_PORT"
     fi
 
-    # Update Config with Dynamic Values
-    sed -i "s/interface: .*/interface: \"$WAN_INT\"/" /etc/paqet/config.yaml
-    sed -i "s|addr: .* # DYNAMIC|addr: \"$TARGET_ADDR\" # DYNAMIC|" /etc/paqet/config.yaml
-    sed -i "s|addr: \"0.0.0.0:0\"|addr: \"$TARGET_ADDR\"|" /etc/paqet/config.yaml
-    sed -i "s/router_mac: .*/router_mac: \"$ROUTER_MAC\"/" /etc/paqet/config.yaml
+    # Update Config (Self-Healing Regex)
+    # This aggressive sed fixes the line regardless of current state
+    sed -i "s|interface: .*|interface: \"$WAN_INT\"|" /etc/paqet/config.yaml
+    sed -i "s|addr: \".*\"|addr: \"$TARGET_ADDR\"|" /etc/paqet/config.yaml
+    sed -i "s|addr: \"0.0.0.0:0\"|addr: \"$TARGET_ADDR\"|" /etc/paqet/config.yaml # Fallback for clean config
+    sed -i "s|router_mac: .*|router_mac: \"$ROUTER_MAC\"|" /etc/paqet/config.yaml
 
-    # Extract Server Info for Robust Firewall Rules
-    SERVER_ADDR=$(grep "addr:" /etc/paqet/config.yaml | grep -v "DYNAMIC" | head -n 1 | awk '{print $2}' | tr -d '"')
+    # Extract Server Info for Firewall
+    SERVER_ADDR=$(grep "addr:" /etc/paqet/config.yaml | grep -v "$WAN_IP" | grep -v "0.0.0.0" | head -n 1 | awk '{print $2}' | tr -d '"')
     S_IP=$(echo $SERVER_ADDR | cut -d: -f1)
     S_PORT=$(echo $SERVER_ADDR | cut -d: -f2)
 
-    # Firewall Rules (NFTables)
+    # Firewall Rules
     nft delete table inet paqet_rules 2>/dev/null || true
     nft add table inet paqet_rules
     nft add chain inet paqet_rules prerouting { type filter hook prerouting priority -300 \; }
@@ -266,10 +266,12 @@ setup_network() {
     # MSS Clamping
     nft add rule inet paqet_rules forward tcp flags syn tcp option maxseg size set 1300
     
-    # Bypass Conntrack: Match by Server IP/Port (Works for both Single and Multi conn)
-    nft add rule inet paqet_rules prerouting ip saddr $S_IP tcp sport $S_PORT notrack
-    nft add rule inet paqet_rules output ip daddr $S_IP tcp dport $S_PORT notrack
-    nft add rule inet paqet_rules output ip daddr $S_IP tcp dport $S_PORT tcp flags rst drop
+    # Bypass Conntrack (Match Server IP)
+    if [ -n "$S_IP" ] && [ -n "$S_PORT" ]; then
+        nft add rule inet paqet_rules prerouting ip saddr $S_IP tcp sport $S_PORT notrack
+        nft add rule inet paqet_rules output ip daddr $S_IP tcp dport $S_PORT notrack
+        nft add rule inet paqet_rules output ip daddr $S_IP tcp dport $S_PORT tcp flags rst drop
+    fi
     
     return 0
 }
@@ -297,10 +299,10 @@ EoS
 show_menu() {
     clear
     echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║          PAQWRT MANAGER v2.1.6 - OpenWrt Edition              ║${NC}"
+    echo -e "${BLUE}║          PAQWRT MANAGER v2.1.7 - OpenWrt Edition              ║${NC}"
     echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo -e "1) ${GREEN}Install / Update Core${NC}"
-    echo -e "2) ${YELLOW}Configure / Modify Settings${NC}"
+    echo -e "2) ${YELLOW}Configure / Modify Settings${NC} (Required for Fix)"
     echo -e "3) Start Service"
     echo -e "4) Stop Service"
     echo -e "5) Restart Service"
