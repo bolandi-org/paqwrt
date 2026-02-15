@@ -1,6 +1,6 @@
 #!/bin/sh
 # PAQWRT - Professional Paqet Manager for OpenWrt
-# Version: 2.1.1
+# Version: 2.1.2
 # Repository: https://github.com/bolandi-org/paqwrt
 
 # --- Global Variables ---
@@ -42,9 +42,14 @@ ask_value() {
 
 get_latest_version() {
     # Fetch latest release tag from GitHub API
-    # Using simple grep/sed to avoid jq dependency
-    curl -s "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest" | \
-    grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
+    # GitHub API requires a User-Agent header
+    local response
+    response=$(curl -sL --retry 3 --retry-delay 2 -A "paqwrt-manager" "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest")
+    if [ $? -eq 0 ] && [ -n "$response" ]; then
+        echo "$response" | grep -o '"tag_name":[ ]*"[^"]*"' | head -n 1 | sed 's/"tag_name":[ ]*"//;s/"//'
+    else
+        return 1
+    fi
 }
 
 # --- Core Logic ---
