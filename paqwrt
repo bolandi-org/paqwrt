@@ -359,7 +359,8 @@ if [ "$1" = "install" ]; then
     if [ -f "$0" ] && [ "$(basename "$0")" = "paqwrt" ]; then
         cp "$0" "$TARGET_PATH"
     else
-        curl -sL "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt" -o "$TARGET_PATH"
+        # Use a timestamp to bypass GitHub's raw cache during installation
+        curl -sL "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt?v=$(date +%s)" -o "$TARGET_PATH"
     fi
     
     chmod +x "$TARGET_PATH"
