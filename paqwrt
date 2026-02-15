@@ -345,11 +345,26 @@ fi
 
 # Handle CLI args
 if [ "$1" = "install" ]; then
-    install_dependencies
+    # Ensure install dir exists
+    mkdir -p "$INSTALL_DIR"
+    
+    # Download script if we're running from a pipe/temp file
+    TARGET_PATH="$INSTALL_DIR/paqwrt"
+    
+    # Only update core once
     update_core
-    # Link to bin
-    ln -sf "$(readlink -f "$0")" /usr/bin/paqwrt
+    
+    # Save the script itself to /usr/bin/paqwrt
+    # We use $0 if it's a file, or download if it's a pipe
+    if [ -f "$0" ] && [ "$(basename "$0")" = "paqwrt" ]; then
+        cp "$0" "$TARGET_PATH"
+    else
+        curl -sL "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt" -o "$TARGET_PATH"
+    fi
+    
+    chmod +x "$TARGET_PATH"
     echo -e "${GREEN}Paqwrt installed successfully! Run 'paqwrt' to start.${NC}"
+    exit 0
 else
     while true; do show_menu; done
 fi
