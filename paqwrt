@@ -1,6 +1,6 @@
 #!/bin/sh
 # PAQWRT - Professional Paqet Manager for OpenWrt
-# Version: 2.1.7 (Self-Healing Config Fix)
+# Version: 2.1.8 (Crash Fix: Smart Regex)
 # Repository: https://github.com/bolandi-org/paqwrt
 
 # --- Global Variables ---
@@ -100,7 +100,7 @@ update_core() {
     
     if [ $? -eq 0 ] && [ -s "/tmp/paqet.tar.gz" ]; then
         tar -xzf "/tmp/paqet.tar.gz" -C "/tmp"
-        NEW_BIN=$(find /tmp -type f \( -name "paqet" -o -name "paqet_linux_*" \) | head -n 1)
+        NEW_BIN=$(find /tmp -type f \( -name "paqet" -o -name "paqet" -o -name "paqet_linux_*" \) | head -n 1)
         if [ -n "$NEW_BIN" ]; then
             $SERVICE_FILE stop 2>/dev/null
             mv "$NEW_BIN" "$BINARY_PATH"
@@ -171,7 +171,7 @@ configure_paqet() {
     fi
 
     mkdir -p "$CONF_DIR"
-    # Create base config
+    # Regenerate fresh config (This fixes the panic)
     cat <<EOC > "$CONF_FILE"
 role: "client"
 log:
@@ -233,25 +233,27 @@ setup_network() {
 
     if [ -z "$WAN_IP" ] || [ -z "$ROUTER_MAC" ]; then return 1; fi
 
-    # --- CRITICAL FIX: Handle Multi-Connection Port Binding ---
     CONN=$(awk '/conn:/ {print $2}' /etc/paqet/config.yaml)
     [ -z "$CONN" ] && CONN=1
     
-    # If Conn > 1, use port 0 (random). If Conn = 1, use fixed port.
     if [ "$CONN" -gt 1 ]; then
         TARGET_ADDR="$WAN_IP:0"
     else
         TARGET_ADDR="$WAN_IP:$LOCAL_PORT"
     fi
 
-    # Update Config (Self-Healing Regex)
-    # This aggressive sed fixes the line regardless of current state
+    # --- THE SURGICAL FIX ---
+    # Update Interface
     sed -i "s|interface: .*|interface: \"$WAN_INT\"|" /etc/paqet/config.yaml
-    sed -i "s|addr: \".*\"|addr: \"$TARGET_ADDR\"|" /etc/paqet/config.yaml
-    sed -i "s|addr: \"0.0.0.0:0\"|addr: \"$TARGET_ADDR\"|" /etc/paqet/config.yaml # Fallback for clean config
+    
+    # Update Local Address (Only inside ipv4 block)
+    # Using range address from 'ipv4:' to 'router_mac:'
+    sed -i "/ipv4:/,/router_mac:/ s|addr: .*|addr: \"$TARGET_ADDR\"|" /etc/paqet/config.yaml
+    
+    # Update MAC
     sed -i "s|router_mac: .*|router_mac: \"$ROUTER_MAC\"|" /etc/paqet/config.yaml
 
-    # Extract Server Info for Firewall
+    # Extract Server Info
     SERVER_ADDR=$(grep "addr:" /etc/paqet/config.yaml | grep -v "$WAN_IP" | grep -v "0.0.0.0" | head -n 1 | awk '{print $2}' | tr -d '"')
     S_IP=$(echo $SERVER_ADDR | cut -d: -f1)
     S_PORT=$(echo $SERVER_ADDR | cut -d: -f2)
@@ -266,7 +268,7 @@ setup_network() {
     # MSS Clamping
     nft add rule inet paqet_rules forward tcp flags syn tcp option maxseg size set 1300
     
-    # Bypass Conntrack (Match Server IP)
+    # Bypass Conntrack
     if [ -n "$S_IP" ] && [ -n "$S_PORT" ]; then
         nft add rule inet paqet_rules prerouting ip saddr $S_IP tcp sport $S_PORT notrack
         nft add rule inet paqet_rules output ip daddr $S_IP tcp dport $S_PORT notrack
@@ -299,7 +301,7 @@ EoS
 show_menu() {
     clear
     echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║          PAQWRT MANAGER v2.1.7 - OpenWrt Edition              ║${NC}"
+    echo -e "${BLUE}║          PAQWRT MANAGER v2.1.8 - OpenWrt Edition              ║${NC}"
     echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo -e "1) ${GREEN}Install / Update Core${NC}"
     echo -e "2) ${YELLOW}Configure / Modify Settings${NC} (Required for Fix)"
