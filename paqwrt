@@ -347,6 +347,8 @@ fi
 if [ "$1" = "install" ]; then
     install_dependencies
     update_core
+    # Link to bin
+    ln -sf "$(readlink -f "$0")" /usr/bin/paqwrt
     echo -e "${GREEN}Paqwrt installed successfully! Run 'paqwrt' to start.${NC}"
 else
     while true; do show_menu; done
