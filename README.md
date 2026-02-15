@@ -5,7 +5,7 @@
 ![OpenWrt](https://img.shields.io/badge/Platform-OpenWrt-blue?logo=openwrt)
 ![Bash](https://img.shields.io/badge/Language-Bash-green?logo=gnu-bash)
 ![License](https://img.shields.io/badge/License-MIT-orange)
-![Version](https://img.shields.io/badge/Version-2.2.0-red)
+![Version](https://img.shields.io/badge/Version-2.1.9-red)
 
 **The ultimate all-in-one management tool for deploying [Paqet](https://github.com/hanselime/paqet) tunnels on OpenWrt routers.**
 <br>
