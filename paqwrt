@@ -94,22 +94,39 @@ update_core() {
 
     echo -e "Latest Version: ${GREEN}$LATEST_TAG${NC}"
 
-    # Auto-detect Architecture
+    # --- Advanced Architecture Detection ---
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64) BIN_ARCH="amd64" ;;
-        aarch64) BIN_ARCH="arm64" ;;
-        armv7*) BIN_ARCH="armv7" ;;
+        aarch64|arm64) BIN_ARCH="arm64" ;;
+        armv*) BIN_ARCH="arm32" ;;
+        mips64)
+            # Check for Endianness
+            if [ "$(echo -n I | od -to2 | awk '{print $2}' | cut -c1)" = "0001" ]; then
+                BIN_ARCH="mips64le"
+            else
+                BIN_ARCH="mips64"
+            fi
+            ;;
+        mips*)
+            if [ "$(echo -n I | od -to2 | awk '{print $2}' | cut -c1)" = "0001" ]; then
+                BIN_ARCH="mipsle"
+            else
+                BIN_ARCH="mips"
+            fi
+            ;;
         *) echo -e "${RED}Unsupported architecture: $ARCH${NC}"; return 1 ;;
     esac
 
-    # Download URL construction
+    echo -e "Detected Architecture: ${CYAN}$ARCH -> $BIN_ARCH${NC}"
+
+    # Download URL construction (Matches: paqet-linux-amd64-v1.0.0-alpha.16.tar.gz)
     DOWNLOAD_URL="https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$LATEST_TAG/paqet-linux-$BIN_ARCH-$LATEST_TAG.tar.gz"
     
     echo -e "${BLUE}Downloading binary...${NC}"
-    curl -L "$DOWNLOAD_URL" -o "/tmp/paqet.tar.gz"
+    curl -L --retry 3 --retry-delay 2 "$DOWNLOAD_URL" -o "/tmp/paqet.tar.gz"
     
-    if [ $? -eq 0 ]; then
+    if [ $? -eq 0 ] && [ -s "/tmp/paqet.tar.gz" ]; then
         tar -xzf "/tmp/paqet.tar.gz" -C "/tmp"
         # Find binary regardless of folder structure in tar
         NEW_BIN=$(find /tmp -type f \( -name "paqet" -o -name "paqet_linux_*" \) | head -n 1)
@@ -119,7 +136,7 @@ update_core() {
             mv "$NEW_BIN" "$BINARY_PATH"
             chmod +x "$BINARY_PATH"
             rm "/tmp/paqet.tar.gz"
-            echo -e "${GREEN}Paqet Core updated successfully.${NC}"
+            echo -e "${GREEN}Paqet Core updated to $LATEST_TAG successfully.${NC}"
             
             # Restart if config exists
             if [ -f "$CONF_FILE" ]; then
@@ -127,9 +144,11 @@ update_core() {
             fi
         else
             echo -e "${RED}Extraction failed. Binary not found in archive.${NC}"
+            return 1
         fi
     else
-        echo -e "${RED}Download failed. Check internet connection.${NC}"
+        echo -e "${RED}Download failed. Resource might not be available for $BIN_ARCH.${NC}"
+        return 1
     fi
 }
 
