@@ -1,6 +1,6 @@
 #!/bin/sh
 # PAQWRT - Professional Paqet Manager for OpenWrt
-# Version: 2.1.5
+# Version: 2.1.6 (Fix: Multi-conn port binding)
 # Repository: https://github.com/bolandi-org/paqwrt
 
 # --- Global Variables ---
@@ -24,13 +24,11 @@ NC='\033[0m'
 
 # --- Helper Functions ---
 
-# Ask for input with default value (Enter key logic)
 ask_value() {
     local prompt="$1"
     local default="$2"
     local var_name="$3"
     local input
-
     printf "${CYAN}${prompt} ${NC}[Default: ${GREEN}${default}${NC}]: "
     read -r input
     if [ -z "$input" ]; then
@@ -41,8 +39,6 @@ ask_value() {
 }
 
 get_latest_version() {
-    # Fetch latest release tag from GitHub API
-    # GitHub API requires a User-Agent header
     local response
     response=$(curl -sL --retry 3 --retry-delay 2 -A "paqwrt-manager" "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest")
     if [ $? -eq 0 ] && [ -n "$response" ]; then
@@ -56,11 +52,8 @@ get_latest_version() {
 
 install_dependencies() {
     echo -e "${YELLOW}Syncing dependencies...${NC}"
-    
-    # Check if packages are already installed to avoid opkg update if not needed
     local deps="libpcap curl ca-bundle kmod-nft-bridge ethtool"
     local missing=""
-    
     for dep in $deps; do
         if ! opkg list-installed | grep -q "^$dep"; then
             missing="$missing $dep"
@@ -68,86 +61,59 @@ install_dependencies() {
     done
 
     if [ -n "$missing" ]; then
-        echo -e "${CYAN}Updating package lists...${NC}"
-        opkg update > /dev/null 2>&1
         echo -e "${CYAN}Installing missing packages:${NC} $missing"
+        opkg update > /dev/null 2>&1
         opkg install $missing
     else
         echo -e "${GREEN}All dependencies match.${NC}"
     fi
     
-    # Fix common library missing links in OpenWrt
     [ ! -f /lib/ld-linux-aarch64.so.1 ] && ln -sf /lib/ld-musl-aarch64.so.1 /lib/ld-linux-aarch64.so.1 2>/dev/null
     [ ! -f /usr/lib/libpcap.so.1 ] && ln -sf /usr/lib/libpcap.so.1.0 /usr/lib/libpcap.so.1 2>/dev/null
 }
 
 update_core() {
     install_dependencies
-    
     echo -e "${YELLOW}Checking for Paqet updates...${NC}"
     LATEST_TAG=$(get_latest_version)
-    
     if [ -z "$LATEST_TAG" ]; then
         echo -e "${RED}Error: Could not fetch version info from GitHub.${NC}"
         return 1
     fi
-
     echo -e "Latest Version: ${GREEN}$LATEST_TAG${NC}"
 
-    # --- Advanced Architecture Detection ---
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64) BIN_ARCH="amd64" ;;
         aarch64|arm64) BIN_ARCH="arm64" ;;
         armv*) BIN_ARCH="arm32" ;;
         mips64)
-            # Check for Endianness
-            if [ "$(echo -n I | od -to2 | awk '{print $2}' | cut -c1)" = "0001" ]; then
-                BIN_ARCH="mips64le"
-            else
-                BIN_ARCH="mips64"
-            fi
-            ;;
+            if [ "$(echo -n I | od -to2 | awk '{print $2}' | cut -c1)" = "0001" ]; then BIN_ARCH="mips64le"; else BIN_ARCH="mips64"; fi ;;
         mips*)
-            if [ "$(echo -n I | od -to2 | awk '{print $2}' | cut -c1)" = "0001" ]; then
-                BIN_ARCH="mipsle"
-            else
-                BIN_ARCH="mips"
-            fi
-            ;;
+            if [ "$(echo -n I | od -to2 | awk '{print $2}' | cut -c1)" = "0001" ]; then BIN_ARCH="mipsle"; else BIN_ARCH="mips"; fi ;;
         *) echo -e "${RED}Unsupported architecture: $ARCH${NC}"; return 1 ;;
     esac
 
-    echo -e "Detected Architecture: ${CYAN}$ARCH -> $BIN_ARCH${NC}"
-
-    # Download URL construction (Matches: paqet-linux-amd64-v1.0.0-alpha.16.tar.gz)
     DOWNLOAD_URL="https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$LATEST_TAG/paqet-linux-$BIN_ARCH-$LATEST_TAG.tar.gz"
-    
     echo -e "${BLUE}Downloading binary...${NC}"
     curl -L --retry 3 --retry-delay 2 "$DOWNLOAD_URL" -o "/tmp/paqet.tar.gz"
     
     if [ $? -eq 0 ] && [ -s "/tmp/paqet.tar.gz" ]; then
         tar -xzf "/tmp/paqet.tar.gz" -C "/tmp"
-        # Find binary regardless of folder structure in tar
         NEW_BIN=$(find /tmp -type f \( -name "paqet" -o -name "paqet_linux_*" \) | head -n 1)
-        
         if [ -n "$NEW_BIN" ]; then
             $SERVICE_FILE stop 2>/dev/null
             mv "$NEW_BIN" "$BINARY_PATH"
             chmod +x "$BINARY_PATH"
             rm "/tmp/paqet.tar.gz"
             echo -e "${GREEN}Paqet Core updated to $LATEST_TAG successfully.${NC}"
-            
-            # Restart if config exists
-            if [ -f "$CONF_FILE" ]; then
-                $SERVICE_FILE restart
-            fi
+            if [ -f "$CONF_FILE" ]; then $SERVICE_FILE restart; fi
         else
-            echo -e "${RED}Extraction failed. Binary not found in archive.${NC}"
+            echo -e "${RED}Extraction failed. Binary not found.${NC}"
             return 1
         fi
     else
-        echo -e "${RED}Download failed. Resource might not be available for $BIN_ARCH.${NC}"
+        echo -e "${RED}Download failed.${NC}"
         return 1
     fi
 }
@@ -158,7 +124,6 @@ configure_paqet() {
     echo -e "${BOLD}       PAQWRT CONFIGURATION WIZARD     ${NC}"
     echo -e "${BLUE}=======================================${NC}"
     
-    # 1. Credentials
     printf "Enter Server ${YELLOW}IP:PORT${NC}: "
     read -r SERVER_ADDR
     if [ -z "$SERVER_ADDR" ]; then echo -e "${RED}Server address required!${NC}"; sleep 1; return; fi
@@ -167,14 +132,13 @@ configure_paqet() {
     read -r SECRET_KEY
     if [ -z "$SECRET_KEY" ]; then echo -e "${RED}Key required!${NC}"; sleep 1; return; fi
 
-    # 2. Mode Selection
     echo -e "\n${BOLD}Select Configuration Mode:${NC}"
     echo -e "1) ${GREEN}Default (Optimized/Stable)${NC} -> [Conn:1, Interval:10]"
     echo -e "2) ${YELLOW}Manual (Advanced)${NC} -> [Customize all values]"
     printf "Select [1]: "
     read -r mode_choice
 
-    # Defaults (Based on v1.7.2 logic)
+    # Defaults
     DEF_CONN=1
     DEF_MTU=1350
     DEF_SNDWND=350
@@ -185,7 +149,7 @@ configure_paqet() {
     DEF_NOCONGESTION=1
 
     if [ "$mode_choice" = "2" ]; then
-        echo -e "\n${CYAN}--- Manual Settings (Press Enter to use default) ---${NC}"
+        echo -e "\n${CYAN}--- Manual Settings ---${NC}"
         ask_value "Connections" "6" "CONF_CONN"
         ask_value "MTU" "$DEF_MTU" "CONF_MTU"
         ask_value "Interval (ms)" "$DEF_INTERVAL" "CONF_INTERVAL"
@@ -195,7 +159,6 @@ configure_paqet() {
         ask_value "Resend" "$DEF_RESEND" "CONF_RESEND"
         ask_value "NoCongestion" "$DEF_NOCONGESTION" "CONF_NOCONGESTION"
     else
-        # Default Mode
         CONF_CONN=$DEF_CONN
         CONF_MTU=$DEF_MTU
         CONF_INTERVAL=$DEF_INTERVAL
@@ -207,12 +170,8 @@ configure_paqet() {
         echo -e "${GREEN}Using optimized defaults.${NC}"
     fi
 
-    # Network Detection (Initial)
-    WAN_INT=$(ip route show default | awk '/default/ {print $5}' | head -n1)
-    
     mkdir -p "$CONF_DIR"
-
-    # Write Config File
+    # Placeholder config - will be updated dynamically by init script
     cat <<EOC > "$CONF_FILE"
 role: "client"
 log:
@@ -220,10 +179,10 @@ log:
 socks5:
   - listen: "0.0.0.0:1080"
 network:
-  interface: "$WAN_INT"
+  interface: "eth1"
   ipv4:
-    addr: "0.0.0.0:0"  # DYNAMIC: Updated by init script
-    router_mac: ""     # DYNAMIC: Updated by init script
+    addr: "0.0.0.0:0"  # DYNAMIC
+    router_mac: ""     # DYNAMIC
 server:
   addr: "$SERVER_ADDR"
 transport:
@@ -243,8 +202,6 @@ EOC
 
     create_service_file
     echo -e "${GREEN}Configuration saved.${NC}"
-    
-    # Restart to apply
     $SERVICE_FILE restart
     echo -e "${GREEN}Service restarted.${NC}"
     sleep 1
@@ -258,21 +215,15 @@ USE_PROCD=1
 LOCAL_PORT="55555"
 
 setup_network() {
-    # Watchdog loop to wait for WAN IP (up to 2 minutes)
     local retry=0
     while [ $retry -lt 40 ]; do
         WAN_INT=$(ip route show default | awk '/default/ {print $5}' | head -n1)
         GW_IP=$(ip route show default | awk '/default/ {print $3}' | head -n1)
         
         if [ -n "$WAN_INT" ] && [ -n "$GW_IP" ]; then
-            # Use broader match for IP to support different BusyBox versions
             WAN_IP=$(ip addr show $WAN_INT 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1 | head -n 1)
             ping -c 1 -W 1 $GW_IP >/dev/null 2>&1
-            ROUTER_MAC=$(ip neigh show $GW_IP 2>/dev/null | awk '/..:..:..:..:..:../ {print $5}' | head -n 1)
-            # Fallback for MAC if awk fails
-            if [ -z "$ROUTER_MAC" ]; then
-                ROUTER_MAC=$(ip neigh show $GW_IP 2>/dev/null | grep -oE "..:..:..:..:..:.." | head -n 1)
-            fi
+            ROUTER_MAC=$(ip neigh show $GW_IP 2>/dev/null | grep -oE "..:..:..:..:..:.." | head -n 1)
             
             if [ -n "$WAN_IP" ] && [ -n "$ROUTER_MAC" ]; then break; fi
         fi
@@ -282,24 +233,25 @@ setup_network() {
 
     if [ -z "$WAN_IP" ] || [ -z "$ROUTER_MAC" ]; then return 1; fi
 
-    # Fix: Validation only allows 1 connection if port is explicitly set
+    # --- CRITICAL FIX: Handle Multi-Connection Port Binding ---
     CONN=$(grep "conn:" /etc/paqet/config.yaml | awk '{print $2}')
     [ -z "$CONN" ] && CONN=1
     
-    # Validation: multiple connections require NO explicit port
+    # If Conn > 1, we MUST use port 0 (random ephemeral ports).
+    # If Conn = 1, we can use a fixed port (better for debugging).
     if [ "$CONN" -gt 1 ]; then
-        # For multi-conn, use IP only or 0.0.0.0 (paqet will handle ports)
-        TARGET_ADDR="$WAN_IP"
+        TARGET_ADDR="$WAN_IP:0"
     else
         TARGET_ADDR="$WAN_IP:$LOCAL_PORT"
     fi
 
-    # Inject Dynamic Network Info into Config
+    # Update Config with Dynamic Values
     sed -i "s/interface: .*/interface: \"$WAN_INT\"/" /etc/paqet/config.yaml
-    sed -i "s/addr: .* # DYNAMIC/addr: \"$TARGET_ADDR\" # DYNAMIC/" /etc/paqet/config.yaml
+    sed -i "s|addr: .* # DYNAMIC|addr: \"$TARGET_ADDR\" # DYNAMIC|" /etc/paqet/config.yaml
+    sed -i "s|addr: \"0.0.0.0:0\"|addr: \"$TARGET_ADDR\"|" /etc/paqet/config.yaml
     sed -i "s/router_mac: .*/router_mac: \"$ROUTER_MAC\"/" /etc/paqet/config.yaml
 
-    # Extract Server Info for NFT Rules
+    # Extract Server Info for Robust Firewall Rules
     SERVER_ADDR=$(grep "addr:" /etc/paqet/config.yaml | grep -v "DYNAMIC" | head -n 1 | awk '{print $2}' | tr -d '"')
     S_IP=$(echo $SERVER_ADDR | cut -d: -f1)
     S_PORT=$(echo $SERVER_ADDR | cut -d: -f2)
@@ -311,9 +263,10 @@ setup_network() {
     nft add chain inet paqet_rules output { type filter hook output priority -300 \; }
     nft add chain inet paqet_rules forward { type filter hook forward priority -150 \; }
     
+    # MSS Clamping
     nft add rule inet paqet_rules forward tcp flags syn tcp option maxseg size set 1300
     
-    # Bypass Conntrack by Server IP/Port (More robust for multi-conn)
+    # Bypass Conntrack: Match by Server IP/Port (Works for both Single and Multi conn)
     nft add rule inet paqet_rules prerouting ip saddr $S_IP tcp sport $S_PORT notrack
     nft add rule inet paqet_rules output ip daddr $S_IP tcp dport $S_PORT notrack
     nft add rule inet paqet_rules output ip daddr $S_IP tcp dport $S_PORT tcp flags rst drop
@@ -344,7 +297,7 @@ EoS
 show_menu() {
     clear
     echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║          PAQWRT MANAGER v2.1 - OpenWrt Edition                ║${NC}"
+    echo -e "${BLUE}║          PAQWRT MANAGER v2.1.6 - OpenWrt Edition              ║${NC}"
     echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo -e "1) ${GREEN}Install / Update Core${NC}"
     echo -e "2) ${YELLOW}Configure / Modify Settings${NC}"
@@ -354,10 +307,8 @@ show_menu() {
     echo -e "6) Show Logs"
     echo -e "7) ${RED}Uninstall${NC}"
     echo -e "0) Exit"
-    echo -e "---------------------------------------"
     printf "Select option: "
     read -r opt
-    
     case $opt in
         1) update_core; read -p "Press Enter..." ;;
         2) install_dependencies; configure_paqet; read -p "Press Enter..." ;;
@@ -365,55 +316,21 @@ show_menu() {
         4) $SERVICE_FILE stop; echo "Stopped."; read -p "Press Enter..." ;;
         5) $SERVICE_FILE restart; echo "Restarted."; read -p "Press Enter..." ;;
         6) logread | grep paqet | tail -n 20; read -p "Press Enter..." ;;
-        7) 
-            $SERVICE_FILE stop
-            $SERVICE_FILE disable
-            rm -rf $CONF_DIR $SERVICE_FILE $INSTALL_DIR/paqet /usr/bin/paqwrt
-            nft delete table inet paqet_rules 2>/dev/null
-            echo "Uninstalled."; exit 0 
-            ;;
+        7) $SERVICE_FILE stop; $SERVICE_FILE disable; rm -rf $CONF_DIR $SERVICE_FILE $INSTALL_DIR/paqet /usr/bin/paqwrt; nft delete table inet paqet_rules 2>/dev/null; echo "Uninstalled."; exit 0 ;;
         0) exit 0 ;;
         *) echo "Invalid option"; sleep 1 ;;
     esac
 }
 
-# --- Entry Point ---
+if [ "$(id -u)" != "0" ]; then echo "Error: Must run as root!"; exit 1; fi
 
-# Check root
-if [ "$(id -u)" != "0" ]; then
-    echo "Error: Must run as root!"
-    exit 1
-fi
-
-# Handle CLI args
 if [ "$1" = "install" ]; then
-    # Define target paths
     TARGET_PATH="/usr/bin/paqwrt"
-    mkdir -p /usr/bin
-    
     update_core
-    
-    # Check if we are already running from a physical file (e.g., if user downloaded first)
-    if [ -f "$0" ] && [ -s "$0" ] && grep -q "PAQWRT" "$0" 2>/dev/null; then
-        echo -e "${GREEN}Using local script content...${NC}"
-        cp "$0" "$TARGET_PATH" 2>/dev/null || true
-    fi
-
-    # If file doesn't exist or is empty, try download as fallback
-    if [ ! -s "$TARGET_PATH" ]; then
-        echo -e "${YELLOW}Downloading script to $TARGET_PATH...${NC}"
-        curl -L --retry 3 --retry-delay 2 "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt?v=$(date +%s)" > "$TARGET_PATH"
-    fi
-    
-    if [ -s "$TARGET_PATH" ]; then
-        chmod +x "$TARGET_PATH"
-        hash -r 2>/dev/null || true
-        echo -e "${GREEN}Paqwrt installed successfully! Run 'paqwrt' to start.${NC}"
-    else
-        echo -e "${RED}Error: Failed to save script to $TARGET_PATH. Check your connection.${NC}"
-        exit 1
-    fi
-    exit 0
+    if [ -f "$0" ] && grep -q "PAQWRT" "$0" 2>/dev/null; then cp "$0" "$TARGET_PATH"; fi
+    if [ ! -s "$TARGET_PATH" ]; then curl -L "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt" > "$TARGET_PATH"; fi
+    chmod +x "$TARGET_PATH"
+    echo -e "${GREEN}Paqwrt installed successfully! Run 'paqwrt' to start.${NC}"
 else
     while true; do show_menu; done
 fi
