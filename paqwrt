@@ -1,6 +1,6 @@
 #!/bin/sh
 # PAQWRT - Professional Paqet Manager for OpenWrt
-# Version: 2.1.0
+# Version: 2.1.1
 # Repository: https://github.com/bolandi-org/paqwrt
 
 # --- Global Variables ---
@@ -50,7 +50,7 @@ get_latest_version() {
 # --- Core Logic ---
 
 install_dependencies() {
-    echo -e "${YELLOW}Checking dependencies...${NC}"
+    echo -e "${YELLOW}Syncing dependencies...${NC}"
     
     # Check if packages are already installed to avoid opkg update if not needed
     local deps="libpcap curl ca-bundle kmod-nft-bridge ethtool"
