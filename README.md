@@ -37,7 +37,7 @@ Features **Smart Network Discovery**, **NFTables Bypass**, and **Zero-Lag Optimi
 SSH into your OpenWrt router and run this single command:
 
 ```bash
-sh -c "$(curl -sL https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt)" -- install
+curl -L "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt" -o /usr/bin/paqwrt && chmod +x /usr/bin/paqwrt && paqwrt install
 ```
 
 > **Note:** This command installs the script to `/usr/bin/paqwrt` and makes it executable.

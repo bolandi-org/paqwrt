@@ -351,17 +351,24 @@ if [ "$1" = "install" ]; then
     
     update_core
     
-    # Force download using redirection (more robust than -o on some OpenWrt builds)
-    echo -e "${YELLOW}Saving script to $TARGET_PATH...${NC}"
-    curl -L "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt?v=$(date +%s)" > "$TARGET_PATH"
+    # Check if we are already running from a physical file (e.g., if user downloaded first)
+    if [ -f "$0" ] && [ -s "$0" ] && grep -q "PAQWRT" "$0" 2>/dev/null; then
+        echo -e "${GREEN}Using local script content...${NC}"
+        cp "$0" "$TARGET_PATH" 2>/dev/null || true
+    fi
+
+    # If file doesn't exist or is empty, try download as fallback
+    if [ ! -s "$TARGET_PATH" ]; then
+        echo -e "${YELLOW}Downloading script to $TARGET_PATH...${NC}"
+        curl -L --retry 3 --retry-delay 2 "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt?v=$(date +%s)" > "$TARGET_PATH"
+    fi
     
-    if [ $? -eq 0 ] && [ -s "$TARGET_PATH" ]; then
+    if [ -s "$TARGET_PATH" ]; then
         chmod +x "$TARGET_PATH"
-        # Refresh shell hash so it finds the new command immediately
         hash -r 2>/dev/null || true
         echo -e "${GREEN}Paqwrt installed successfully! Run 'paqwrt' to start.${NC}"
     else
-        echo -e "${RED}Error: Failed to save script to $TARGET_PATH${NC}"
+        echo -e "${RED}Error: Failed to save script to $TARGET_PATH. Check your connection.${NC}"
         exit 1
     fi
     exit 0
