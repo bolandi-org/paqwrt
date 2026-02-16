@@ -1,98 +1,105 @@
-# PAQWRT - Professional Paqet Manager for OpenWrt
+# PaqWrt - Professional Paqet Manager for OpenWrt
 
-<div align="center">
-
-![OpenWrt](https://img.shields.io/badge/Platform-OpenWrt-blue?logo=openwrt)
-![Bash](https://img.shields.io/badge/Language-Bash-green?logo=gnu-bash)
-![License](https://img.shields.io/badge/License-MIT-orange)
-![Version](https://img.shields.io/badge/Version-2.1.9-red)
+[![OpenWrt](https://img.shields.io/badge/Platform-OpenWrt-blue?logo=openwrt)](https://openwrt.org/)
+[![Bash](https://img.shields.io/badge/Language-Bash-green?logo=gnu-bash)](https://www.gnu.org/software/bash/)
+[![License](https://img.shields.io/badge/License-MIT-orange)](https://opensource.org/licenses/MIT)
+![Version](https://img.shields.io/badge/Version-2.2.0-red)
 
 **The ultimate all-in-one management tool for deploying [Paqet](https://github.com/hanselime/paqet) tunnels on OpenWrt routers.**
-<br>
-Features **Smart Network Discovery**, **NFTables Bypass**, and **Zero-Lag Optimization**.
-
-</div>
 
 ---
 
-## 📖 Introduction
+## � Installation
 
-**PAQWRT** is a robust shell script wrapper designed to automate the deployment, configuration, and management of the `paqet` raw-socket tunnel on OpenWrt devices. It is engineered specifically for the constraints of embedded routers, handling complex tasks like firewall injection and service management automatically.
+### 1. Prerequisites (Mandatory)
+Before running the installation command, ensure that `curl` is installed on your router. If it's not installed, run:
 
-### ✨ Key Features
+```bash
+opkg update && opkg install curl
+```
 
-* **🚀 One-Command Deployment:** Installs dependencies (`libpcap`, `kmod-nft-bridge`, etc.) and detects CPU architecture (`x86_64`, `aarch64`, `armv7`) automatically.
-* **🔄 Auto-Update:** Fetches the latest core binary release directly from the upstream repository.
-* **🛡️ Router-Level Bypass:** Uses `nftables` with negative priority hooks (`-300`) to bypass connection tracking (`NOTRACK`), ensuring raw packet integrity.
-* **⚡ Zero-Lag Optimization:** Automatically applies **MSS Clamping** rules to fix loading issues with heavy websites (e.g., Swagger UIs, Dashboards).
-* **🧠 Smart Configuration Modes:**
-    * **Default Mode:** Applies stability-focused settings (`conn: 1`, `interval: 10`) ideal for most users.
-    * **Manual Mode:** Allows granular control over `Connections`, `MTU`, `SndWnd`, `RcvWnd`, and buffers. Supports "Enter for Default" workflow.
-* **📡 Dynamic Network Discovery:** Automatically detects WAN IP and Gateway MAC address on every boot to handle dynamic IPs.
-
----
-
-## 📦 Installation
-
-SSH into your OpenWrt router and run this single command:
+### 2. Quick Install
+Run the following command to download the manager and start it:
 
 ```bash
 curl -L "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt" -o /usr/bin/paqwrt && chmod +x /usr/bin/paqwrt && paqwrt install
 ```
 
-> **Note:** This command installs the script to `/usr/bin/paqwrt` and makes it executable.
+---
 
-## 🚀 Usage Guide
+## 🛠 Usage & Features
 
-To open the interactive management menu, simply type:
+After installation, simply type `paqwrt` in your terminal to open the interactive menu.
+
+1.  **Install / Update Core:** Downloads the latest Paqet binary matching your CPU architecture (Auto-detected).
+2.  **Configure:** Setup your server IP:Port, encryption key, and performance settings.
+3.  **Manage Service:** Start, Stop, or Restart the tunnel.
+4.  **Logging:** Real-time system logs for troubleshooting.
+
+### Integration with other Apps (PassWall / v2rayA)
+Paqwrt starts a SOCKS5 proxy on port **1080**. You can use it as an upstream proxy in other OpenWrt apps:
+
+*   **PassWall:** Go to `Node Settings` -> `Add` -> Select Type `SOCKS5` -> IP `127.0.0.1` -> Port `1080`.
+*   **v2rayA/OpenClash:** Use `127.0.0.1:1080` as your proxy source to route all router traffic through Paqet.
+
+---
+
+## 💎 Design Philosophy
+*   **Architecture Detection:** Smartly detects MIPS, ARM, x86, and their Endianness.
+*   **Self-Healing Config:** Automatically repairs configuration blocks if corrupted.
+*   **KCP Optimization:** Pre-configured with "Optimized/Stable" and "Manual" modes.
+*   **Firewall Bypass:** Uses `NFTables` to bypass `conntrack`, ensuring high speed and low CPU usage.
+
+---
+
+# 🇮🇷 راهنمای فارسی (Persian Documentation)
+
+**پک‌وِرت (PaqWrt) - ابزار حرفه‌ای مدیریت تونل Paqet روی روترهای OpenWrt**
+
+---
+
+## 🚀 نصب و راه‌اندازی
+
+### ۱. پیش‌نیازها (اجباری)
+قبل از اجرای کد نصب، مطمئن شوید ابزار `curl` روی روتر شما نصب است. اگر نصب نیست، دستور زیر را اجرا کنید:
 
 ```bash
-paqwrt
+opkg update && opkg install curl
 ```
 
-### Configuration Steps
+### ۲. نصب سریع
+دستور زیر را کپی کرده و در ترمینال روتر خود اجرا کنید:
 
-1.  **Install Core:** Select Option 1 to download the latest binary.
-2.  **Configure:** Select Option 2.
-    *   Enter your **Server IP:Port** and **Encryption Key**.
-    *   **Choose Mode:**
-        *   **Default:** Sets Connections: 1, MTU: 1350, Interval: 10.
-        *   **Manual:** Prompts for each value. Press Enter to use the recommended default for any setting.
-3.  **Start:** Select Option 3 to apply firewall rules and start the tunnel.
-
----
-
-## ⚙️ Advanced Configuration
-
-| Parameter | Default | Description |
-| :--- | :--- | :--- |
-| **Connections** | 1 | Number of simultaneous TCP connections. Increase to 4-6 for high-speed fiber. |
-| **Interval** | 10 | Internal update interval (ms). Lower is more responsive but uses more CPU. |
-| **MTU** | 1350 | Maximum Transmission Unit. Lower if you experience packet loss. |
-| **SndWnd** | 350 | Upload window size. Controls upload throughput. |
-| **RcvWnd** | 450 | Download window size. Controls download throughput. |
-
----
-
-## 🔧 How It Works
-
-### Firewall Injection (NFTables)
-PAQWRT injects rules into the `inet` table with high priority to ensure packets are processed before the main firewall (fw4).
-
-```nftables
-# MSS Clamping to fix fragmentation
-rule forward tcp flags syn tcp option maxseg size set 1300
-
-# NOTRACK to bypass conntrack for raw sockets
-rule prerouting tcp sport 1443 tcp dport 55555 notrack
+```bash
+curl -L "https://raw.githubusercontent.com/bolandi-org/paqwrt/main/paqwrt" -o /usr/bin/paqwrt && chmod +x /usr/bin/paqwrt && paqwrt install
 ```
 
-### Service Management (Procd)
-The service file `/etc/init.d/paqet` handles the lifecycle. It includes a **Watchdog** logic that waits for the WAN interface to receive an IP address before starting the tunnel, preventing boot-loops.
+---
+
+## � راهنمای استفاده و قابلیت‌ها
+
+پس از نصب، کافیست کلمه `paqwrt` را در ترمینال بنویسید تا منوی مدیریت باز شود.
+
+1.  **بروزرسانی هسته:** شناسایی خودکار نوع پردازنده روتر و دانلود آخرین نسخه Paqet.
+2.  **تنظیمات:** وارد کردن آی‌پی سرور، کلید رمزنگاری و تنظیمات سرعت.
+3.  **مدیریت سرویس:** استارت، استاپ و ریستارت برنامه.
+4.  **بررسی لاگ:** مشاهده وضعیت لحظه‌ای و عیب‌یابی.
+
+### اتصال به PassWall و v2rayA
+برنامه PaqWrt یک پروکسی **SOCKS5** روی پورت **1080** اجرا می‌کند. شما می‌توانید از این پورت در برنامه‌های دیگر استفاده کنید:
+
+*   **PassWall:** یک نود جدید از نوع `SOCKS5` بسازید، آی‌پی را `127.0.0.1` و پورت را `1080` بگذارید.
+*   **v2rayA:** از آدرس `127.0.0.1:1080` به عنوان منبع پروکسی استفاده کنید تا تمام اینترنت روتر از تونل عبور کند.
 
 ---
 
-## 📝 License
+## � قابلیت‌های فنی
+*   **تشخیص هوشمند معماری:** پشتیبانی از تمام متغیرهای MIPS، ARM و x86.
+*   **رفع خطای خودکار:** اصلاح برچسب‌های کانفیگ در صورت خرابی فایل.
+*   **بهینه‌سازی KCP:** دارای مدهای "پیش‌فرض" و "دستی" برای حداکثر سرعت.
+*   **فایروال پیشرفته:** استفاده از `NFTables` برای کاهش فشار به CPU و افزایش پایداری اتصال.
 
-This project is licensed under the MIT License.
-Based on the core logic of [paqet](https://github.com/hanselime/paqet).
+---
+
+## � License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
