@@ -1,6 +1,6 @@
 #!/bin/sh
 # PAQWRT - Professional Paqet Manager for OpenWrt
-# Version: 2.1.9 (Fixed Multi-Connection Logic)
+# Version: 2.2.1 (Improved Architecture Detection for MIPS/MT7621)
 # Repository: https://github.com/bolandi-org/paqwrt
 
 # --- Global Variables ---
@@ -82,17 +82,46 @@ update_core() {
     fi
     echo -e "Latest Version: ${GREEN}$LATEST_TAG${NC}"
 
-    ARCH=$(uname -m)
+    # Smart Architecture Detection using opkg
+    echo -e "${YELLOW}Detecting Architecture...${NC}"
+    OPKG_ARCH=$(opkg print-architecture | grep -oE '(x86_64|aarch64|arm_cortex|mipsel|mips|arm)' | head -n 1)
+    
+    if [ -z "$OPKG_ARCH" ]; then
+        # Fallback to uname if opkg fails
+        ARCH=$(uname -m)
+    else
+        ARCH=$OPKG_ARCH
+    fi
+
+    BIN_ARCH=""
     case "$ARCH" in
         x86_64) BIN_ARCH="amd64" ;;
         aarch64|arm64) BIN_ARCH="arm64" ;;
-        armv*) BIN_ARCH="arm32" ;;
-        mips64)
-            if [ "$(echo -n I | od -to2 | awk '{print $2}' | cut -c1)" = "0001" ]; then BIN_ARCH="mips64le"; else BIN_ARCH="mips64"; fi ;;
-        mips*)
-            if [ "$(echo -n I | od -to2 | awk '{print $2}' | cut -c1)" = "0001" ]; then BIN_ARCH="mipsle"; else BIN_ARCH="mips"; fi ;;
-        *) echo -e "${RED}Unsupported architecture: $ARCH${NC}"; return 1 ;;
+        arm*|arm_cortex*) BIN_ARCH="arm32" ;;
+        mipsel*|mips64el*) BIN_ARCH="mipsle" ;;
+        mips64) BIN_ARCH="mips64" ;;
+        mips) 
+             # Fallback check for raw 'mips' output (check endianness manually)
+             if [ "$(echo -n I | od -to2 2>/dev/null | awk '{print $2}' | cut -c1)" = "0" ]; then
+                 BIN_ARCH="mipsle"
+             else
+                 BIN_ARCH="mips"
+             fi
+             ;;
+        *) 
+            # If explicit opkg/uname check failed, try to guess from available opkg feeds
+            if opkg print-architecture | grep -q "mipsel"; then BIN_ARCH="mipsle";
+            elif opkg print-architecture | grep -q "mips_"; then BIN_ARCH="mips";
+            elif opkg print-architecture | grep -q "aarch64"; then BIN_ARCH="arm64";
+            elif opkg print-architecture | grep -q "arm"; then BIN_ARCH="arm32";
+            else 
+                echo -e "${RED}Unsupported architecture: $ARCH (Raw: $(uname -m))${NC}"
+                return 1
+            fi
+            ;;
     esac
+    
+    echo -e "Detected Target: ${GREEN}$BIN_ARCH${NC}"
 
     DOWNLOAD_URL="https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$LATEST_TAG/paqet-linux-$BIN_ARCH-$LATEST_TAG.tar.gz"
     echo -e "${BLUE}Downloading binary...${NC}"
@@ -345,7 +374,7 @@ show_status() {
 show_menu() {
     clear
     echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║          PAQWRT MANAGER v2.1.9 - OpenWrt Edition              ║${NC}"
+    echo -e "${BLUE}║          PAQWRT MANAGER v2.2.1 - OpenWrt Edition              ║${NC}"
     echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo -e "1) ${GREEN}Install / Update Core${NC}"
     echo -e "2) ${YELLOW}Configure / Modify Settings${NC}"
@@ -382,13 +411,31 @@ if [ "$1" = "install" ]; then
     echo -e "${YELLOW}Fetching latest version...${NC}"
     LATEST_TAG=$(get_latest_version)
     if [ -n "$LATEST_TAG" ]; then
-        ARCH=$(uname -m)
+        # Smart Architecture Detection using opkg
+        OPKG_ARCH=$(opkg print-architecture | grep -oE '(x86_64|aarch64|arm_cortex|mipsel|mips|arm)' | head -n 1)
+        if [ -n "$OPKG_ARCH" ]; then ARCH=$OPKG_ARCH; else ARCH=$(uname -m); fi
+
         case "$ARCH" in
             x86_64) BIN_ARCH="amd64" ;;
             aarch64|arm64) BIN_ARCH="arm64" ;;
-            armv*) BIN_ARCH="arm32" ;;
-            *) echo -e "${RED}Arch $ARCH not supported${NC}"; exit 1 ;;
+            arm*|arm_cortex*) BIN_ARCH="arm32" ;;
+            mipsel*|mips64el*) BIN_ARCH="mipsle" ;;
+            mips64) BIN_ARCH="mips64" ;;
+            mips) 
+                if [ "$(echo -n I | od -to2 2>/dev/null | awk '{print $2}' | cut -c1)" = "0" ]; then
+                    BIN_ARCH="mipsle"
+                else
+                    BIN_ARCH="mips"
+                fi
+                ;;
+            *) 
+                # Last resort fuzzy match
+                if opkg print-architecture | grep -q "mipsel"; then BIN_ARCH="mipsle";
+                elif opkg print-architecture | grep -q "mips_"; then BIN_ARCH="mips";
+                else echo -e "${RED}Unsupported architecture: $ARCH ${NC}"; exit 1; fi 
+                ;;
         esac
+
         DOWNLOAD_URL="https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$LATEST_TAG/paqet-linux-$BIN_ARCH-$LATEST_TAG.tar.gz"
         curl -L --retry 3 "$DOWNLOAD_URL" -o "/tmp/paqet.tar.gz"
         if [ $? -eq 0 ]; then
